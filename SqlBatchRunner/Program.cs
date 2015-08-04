@@ -5,6 +5,7 @@ namespace SqlBatchRunner
 {
     class Program
     {
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Microsoft.Globalization", "CA1303:Do not pass literals as localized parameters", MessageId = "System.Console.WriteLine(System.String,System.Object)")]
         static int Main(string[] args)
         {
             var result = 0;

@@ -57,14 +57,14 @@ namespace SqlBatchRunner
             }
         }
 
-        Config GetConfig(string dirName)
+        static Config GetConfig(string dirName)
         {
             DataContractJsonSerializer serializer = new DataContractJsonSerializer(typeof(Config));
 
-            var stream = File.OpenRead(Path.Combine(dirName, "config.json"));
-            var config = (Config)serializer.ReadObject(stream);
-
-            return config;
+            using (var stream = File.OpenRead(Path.Combine(dirName, "config.json")))
+            {
+                return (Config)serializer.ReadObject(stream);
+            }
         }
 
         string GetConnectionString(string dirName)
@@ -79,10 +79,13 @@ namespace SqlBatchRunner
             if (string.IsNullOrEmpty(result))
                 result = config.ConnectionString;
 
+            if (string.IsNullOrWhiteSpace(result))
+                throw new ArgumentException("ConnectionString not found");
+
             return result;
         }
 
-        string GetConnectionStringFromXML(string xmlFile, IEnumerable<ConnectionStringPathAndAttribute> searchValues)
+        static string GetConnectionStringFromXML(string xmlFile, IEnumerable<ConnectionStringPathAndAttribute> searchValues)
         {
             string result = null;
 

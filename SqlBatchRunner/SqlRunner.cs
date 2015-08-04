@@ -28,6 +28,8 @@ namespace SqlBatchRunner
 
         public void Run(String folderPath)
         {
+            CreateDatabaseIfNotExist();
+
             DataTable filesPreviouslyRun = readControlTable();
 
             if (filesPreviouslyRun != null)
@@ -50,52 +52,74 @@ namespace SqlBatchRunner
                     }
                     else
                     {
-                        Console.WriteLine(" - Running...");
+                        Console.WriteLine(" - Executing...");
                         runSql(fileojb.Name, fileContent, cksum);
                     }
                 }
             }
-            return;
+        }
+
+        void CreateDatabaseIfNotExist()
+        {
+            SqlConnectionStringBuilder scsb = new SqlConnectionStringBuilder(connectionString);
+
+            var targetDb = scsb.InitialCatalog;
+            scsb.InitialCatalog = "master";
+
+            using (var connection = new SqlConnection(scsb.ConnectionString))
+            {
+                var commandText = string.Format("IF DB_ID(N'{0}') IS NULL BEGIN CREATE DATABASE {0} IF NOT EXISTS (SELECT name FROM master.sys.server_principals WHERE name = 'DEV') BEGIN CREATE LOGIN[DEV] WITH PASSWORD = N'password' ALTER SERVER ROLE [sysadmin] ADD MEMBER [dev] END END", targetDb);
+
+                using (var command = new SqlCommand(commandText, connection))
+                {
+                    connection.Open();
+                    command.ExecuteNonQuery();
+                }
+            }
         }
 
         void runSql(String fileName, String fileContent, String cksum)
         {
-            var con = new SqlConnection(connectionString);
-            var cmd = new SqlCommand("query", con);
-
-            try
+            if (isUnattendedModeEnabled || ConfirmToContinue(" Execute SQL"))
             {
-                con.Open();
-
-                if (isUnattendedModeEnabled || ConfirmToContinue(" Run batch: " + fileName))
+                using (var connection = new SqlConnection(connectionString))
                 {
+                    connection.Open();
+
                     foreach (var query in Queries(fileContent))
                     {
-                        cmd.CommandText = query;
-                        cmd.ExecuteNonQuery();
+                        using (var command = new SqlCommand(query, connection))
+                        {
+                            try
+                            {
+                                command.ExecuteNonQuery();
+                            }
+                            catch (SqlException)
+                            {
+                                Console.WriteLine(query);
+                                throw;
+                            }
+                        }
                     }
                 }
+            }
 
-                //  log the filename in table
-                if (isUnattendedModeEnabled || ConfirmToContinue(" Update tracking table"))
+            //  log the filename in table
+            if (isUnattendedModeEnabled || ConfirmToContinue(" Update tracking table"))
+            {
+                using (var connection = new SqlConnection(connectionString))
                 {
-                    cmd.CommandText = String.Format("insert into [dbo].[SqlBatchControl] (OriginalFileName, CheckSum, Connection) values ('{0}', '{1}', '{2}')", fileName, cksum, con.Database);
-                    cmd.ExecuteNonQuery();
+                    var commandText = String.Format("insert into [dbo].[SqlBatchControl] (OriginalFileName, CheckSum, Connection) values ('{0}', '{1}', '{2}')", fileName, cksum, connection.Database);
+                    using (var command = new SqlCommand(commandText, connection))
+                    {
+                        connection.Open();
+                        command.ExecuteNonQuery();
+                    }
                 }
             }
-            catch (SqlException)
-            {
-                Console.WriteLine(cmd.CommandText);
-                throw;
-            }
-            finally
-            {
-                con.Close();
-            }
-            return;
         }
 
-        private bool ConfirmToContinue(string v)
+        static bool ConfirmToContinue(string v)
         {
             bool check = false;
             ConsoleKeyInfo ck;
@@ -111,51 +135,32 @@ namespace SqlBatchRunner
             return ck.Key == ConsoleKey.Y;
         }
 
-        public bool createControlTable()
-        {
-            bool result;
-            var con = new SqlConnection(connectionString);
-            var cmd = new SqlCommand(@"if object_id(N'dbo.SqlBatchControl') is null 
-                                        create table dbo.SqlBatchControl ( 
-	                                    OriginalFileName varchar(max) not null, 
-                                        CheckSum varchar(max) not null,
-                                        Connection varchar(max) not null,
-                                        UtcDateRun datetime not null default (getutcdate()) )", con);
-
-            try
-            {
-                con.Open();
-                cmd.ExecuteNonQuery();
-                result = true;
-            }
-            finally
-            {
-                con.Close();
-            }
-            return result;
-        }
-
         DataTable readControlTable()
         {
             DataTable fileDataTable = null;
 
-            if (createControlTable())
-            {
-                var con = new SqlConnection(connectionString);
-                var cmd = new SqlCommand("select OriginalFileName, CheckSum from SqlBatchControl", con);
+            var sqlCommandText = @"if object_id(N'dbo.SqlBatchControl') is null 
+                                        create table dbo.SqlBatchControl ( 
+	                                        OriginalFileName varchar(max) not null, 
+                                            CheckSum varchar(max) not null,
+                                            Connection varchar(max) not null,
+                                            UtcDateRun datetime not null default (getutcdate())
+                                        )
+                                   select OriginalFileName, CheckSum from SqlBatchControl";
 
-                try
+            using (var connection = new SqlConnection(connectionString))
+            {
+                using (var command = new SqlCommand(sqlCommandText, connection))
                 {
-                    con.Open();
-                    SqlDataReader reader = cmd.ExecuteReader();
-                    fileDataTable = new DataTable();
-                    fileDataTable.Load(reader);
-                }
-                finally
-                {
-                    con.Close();
+                    connection.Open();
+                    using (SqlDataReader reader = command.ExecuteReader())
+                    {
+                        fileDataTable = new DataTable();
+                        fileDataTable.Load(reader);
+                    }
                 }
             }
+
             return fileDataTable;
         }
 
@@ -169,7 +174,7 @@ namespace SqlBatchRunner
             }
         }
 
-        IEnumerable<string> Queries(string queryfile)
+        static IEnumerable<string> Queries(string queryfile)
         {
             List<string> queries = new List<string>();
 
@@ -178,23 +183,19 @@ namespace SqlBatchRunner
                 StringBuilder qb = new StringBuilder();
                 string line = null;
 
-                do
+                while ((line = reader.ReadLine()) != null)
                 {
-                    line = reader.ReadLine();
-                    if (!string.IsNullOrWhiteSpace(line))
+                    if (line.Trim().Equals("go", StringComparison.OrdinalIgnoreCase))
                     {
-                        if (line.Trim().Equals("go", StringComparison.OrdinalIgnoreCase))
+                        if (qb.Length > 0)
                         {
-                            if (qb.Length > 0)
-                            {
-                                queries.Add(qb.ToString());
-                                qb.Clear();
-                            }
+                            queries.Add(qb.ToString());
+                            qb.Clear();
                         }
-                        else
-                            qb.AppendLine(line);
                     }
-                } while (line != null);
+                    else if (!string.IsNullOrWhiteSpace(line) || qb.Length > 0)
+                        qb.AppendLine(line);
+                }
 
                 if (qb.Length > 0)
                     queries.Add(qb.ToString());
