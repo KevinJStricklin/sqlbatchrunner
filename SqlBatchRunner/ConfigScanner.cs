@@ -37,6 +37,26 @@ namespace SqlBatchRunner
             return configFound;
         }
 
+        public bool ProcessFile(string directoryName, string fileName)
+        {
+            var configFound = false;
+
+            var filename = Path.Combine(directoryName, "config.json");
+            if (File.Exists(filename))
+            {
+                configFound = true;
+
+                var connectionString = GetConnectionString(directoryName);
+
+                var runner = new SqlRunner(connectionString);
+
+                runner.RunSingleFile(fileName);
+
+                Console.WriteLine();
+            }
+            return configFound;
+        }
+
         void ProcessSingleDirectory(string directoryName)
         {
             var filename = Path.Combine(directoryName, "config.json");
@@ -50,7 +70,13 @@ namespace SqlBatchRunner
 
                 var runner = new SqlRunner(connectionString);
                 if (!isUnattendedModeEnabled)
-                    runner.EnableManualMode();        
+                    runner.EnableManualMode();
+
+                var config = GetConfig(directoryName);
+
+                if (config.DatabaseCreationScripts != null && !string.IsNullOrEmpty(config.DatabaseCreationScripts.CreateScriptFileName))
+                    runner.CreateDatabase(directoryName, config.DatabaseCreationScripts.CreateScriptFileName, config.DatabaseCreationScripts.SchemaAndSeedScriptFileNames ?? new string[] { });
+
                 runner.Run(directoryName);
 
                 Console.WriteLine();
@@ -102,6 +128,22 @@ namespace SqlBatchRunner
             }
 
             return result;
+        }
+
+        static public void GenerateSampleConfig(string filename)
+        {
+            var c = new Config();
+            c.ConnectionString = "connection string";
+            c.DatabaseCreationScripts = new DatabaseCreationScripts();
+            c.DatabaseCreationScripts.CreateScriptFileName = "!Create Database.sql";
+            c.DatabaseCreationScripts.SchemaAndSeedScriptFileNames = new List<string> { "!Schema.sql", "!Seed Data.sql" };
+
+            DataContractJsonSerializer serializer = new DataContractJsonSerializer(typeof(Config));
+
+            using (var stream = File.Create(filename))
+            {
+                serializer.WriteObject(stream, c);
+            }
         }
     }
 }

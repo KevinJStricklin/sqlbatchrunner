@@ -1,4 +1,5 @@
 ﻿using System;
+using System.IO;
 using System.Configuration;
 
 namespace SqlBatchRunner
@@ -9,7 +10,9 @@ namespace SqlBatchRunner
         static int Main(string[] args)
         {
             var result = 0;
-            
+
+            //ConfigScanner.GenerateSampleConfig("test.config");
+
             if (args.Length == 1)
             {
                 /**
@@ -44,6 +47,18 @@ namespace SqlBatchRunner
 
                 var c = new ConfigScanner(xmlFile);
 
+                //foreach (var a in args)
+                //{
+                //    if (a.StartsWith("-"))
+                //    {
+                //        if (a == "-m")
+                //        {
+                //            Console.WriteLine("Manual mode enabled");
+                //            c.EnableManualMode();
+                //        }
+                //    }
+                //}
+
                 if (args.Length == 3 && args[2] == "-m")
                 {
                     Console.WriteLine("Manual mode enabled");
@@ -51,11 +66,23 @@ namespace SqlBatchRunner
                 }
 
                 try
-                { 
-                    if (!c.ProcessDirectory(directoryPath))
+                {
+                    if (File.Exists(directoryPath))
                     {
-                        Console.WriteLine("No configuration file found.");
-                        return 1;
+                        var directory = Path.GetDirectoryName(args[0]);
+                        if (!c.ProcessFile(directory, args[0]))
+                        {
+                            Console.WriteLine("No configuration file found.");
+                            return 1;
+                        }
+                    }
+                    else
+                    {
+                        if (!c.ProcessDirectory(directoryPath))
+                        {
+                            Console.WriteLine("No configuration file found.");
+                            return 1;
+                        }
                     }
                 }
                 catch (Exception e)
@@ -73,3 +100,6 @@ namespace SqlBatchRunner
         }
     }
 }
+
+//manual mode.
+//force single file

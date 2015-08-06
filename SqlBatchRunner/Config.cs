@@ -1,4 +1,5 @@
-﻿using System.Runtime.Serialization;
+﻿using System.Collections.Generic;
+using System.Runtime.Serialization;
 
 namespace SqlBatchRunner
 {
@@ -9,7 +10,10 @@ namespace SqlBatchRunner
         public string ConnectionString { get; set; }
 
         [DataMember]
-        public ConnectionStringPathAndAttribute[] ConnectionStringXmlSearch { get; set; }
+        public IEnumerable<ConnectionStringPathAndAttribute> ConnectionStringXmlSearch { get; set; }
+
+        [DataMember]
+        public DatabaseCreationScripts DatabaseCreationScripts { get; set; }
     }
 
     [DataContract]
@@ -20,5 +24,15 @@ namespace SqlBatchRunner
 
         [DataMember]
         public string Attribute { get; set; }
+    }
+
+    [DataContract]
+    public class DatabaseCreationScripts
+    {
+        [DataMember]
+        public string CreateScriptFileName { get; set; }
+
+        [DataMember]
+        public IEnumerable<string> SchemaAndSeedScriptFileNames { get; set; }
     }
 }

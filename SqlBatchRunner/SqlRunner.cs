@@ -6,6 +6,7 @@ using System.IO;
 using System.Data;
 using System.Security.Cryptography;
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 
 namespace SqlBatchRunner
 {
@@ -28,14 +29,12 @@ namespace SqlBatchRunner
 
         public void Run(String folderPath)
         {
-            CreateDatabaseIfNotExist();
-
             DataTable filesPreviouslyRun = readControlTable();
 
             if (filesPreviouslyRun != null)
             {
                 var folderInfo = new DirectoryInfo(folderPath);
-                var sqlFiles = folderInfo.EnumerateFiles("*.sql").OrderBy(f => f.Name);
+                var sqlFiles = folderInfo.EnumerateFiles("*.sql").Where(f => !f.Name.StartsWith("!")).OrderBy(f => f.Name);
 
                 foreach (var fileojb in sqlFiles)
                 {
@@ -59,7 +58,16 @@ namespace SqlBatchRunner
             }
         }
 
-        void CreateDatabaseIfNotExist()
+        public void RunSingleFile(string fileName)
+        {
+            Console.Write("{0} - Executing...", fileName);
+
+            var fileContent = File.ReadAllText(fileName);
+
+            ExecuteSqlBatch(fileContent);
+        }
+
+        public void CreateDatabase(string folderPath, string databaseCreateScriptFileName, IEnumerable<string> schemaAndSeedScripts)
         {
             SqlConnectionStringBuilder scsb = new SqlConnectionStringBuilder(connectionString);
 
@@ -68,25 +76,22 @@ namespace SqlBatchRunner
 
             using (var connection = new SqlConnection(scsb.ConnectionString))
             {
-                var commandText = string.Format("IF DB_ID(N'{0}') IS NULL BEGIN CREATE DATABASE {0} IF NOT EXISTS (SELECT name FROM master.sys.server_principals WHERE name = 'DEV') BEGIN CREATE LOGIN[DEV] WITH PASSWORD = N'password' ALTER SERVER ROLE [sysadmin] ADD MEMBER [dev] END END", targetDb);
+                bool DatabaseExists = false;
+
+                var commandText = string.Format("IF DB_ID(N'{0}') IS NOT NULL(SELECT CAST(1 AS BIT)) ELSE (SELECT CAST(0 AS BIT))", targetDb);
 
                 using (var command = new SqlCommand(commandText, connection))
                 {
                     connection.Open();
-                    command.ExecuteNonQuery();
+                    DatabaseExists = (bool)command.ExecuteScalar();
                 }
-            }
-        }
 
-        void runSql(String fileName, String fileContent, String cksum)
-        {
-            if (isUnattendedModeEnabled || ConfirmToContinue(" Execute SQL"))
-            {
-                using (var connection = new SqlConnection(connectionString))
+                if (!DatabaseExists)
                 {
-                    connection.Open();
+                    Console.WriteLine(" Database not found: {0}", targetDb);
+                    var dbCreationScript = GetDatabaseCreationScript(folderPath, databaseCreateScriptFileName, targetDb);
 
-                    foreach (var query in Queries(fileContent))
+                    foreach (var query in Queries(dbCreationScript))
                     {
                         using (var command = new SqlCommand(query, connection))
                         {
@@ -101,7 +106,105 @@ namespace SqlBatchRunner
                             }
                         }
                     }
+
+                    foreach (var scriptFile in schemaAndSeedScripts)
+                    {
+                        Console.WriteLine(" Processing post creation script: {0}", scriptFile);
+
+                        var fileContent = File.ReadAllText(Path.Combine(folderPath, scriptFile));
+                        ExecuteSqlBatch(fileContent);
+                    }
                 }
+            }
+        }
+
+        //void CreateDatabaseIfNotExist(string folderPath)
+        //{
+        //    SqlConnectionStringBuilder scsb = new SqlConnectionStringBuilder(connectionString);
+
+        //    var targetDb = scsb.InitialCatalog;
+        //    scsb.InitialCatalog = "master";
+
+        //    using (var connection = new SqlConnection(scsb.ConnectionString))
+        //    {
+        //        bool DatabaseExists = false;
+
+        //        var commandText = string.Format("IF DB_ID(N'{0}') IS NOT NULL(SELECT CAST(1 AS BIT)) ELSE (SELECT CAST(0 AS BIT))", targetDb);
+
+        //        using (var command = new SqlCommand(commandText, connection))
+        //        {
+        //            connection.Open();
+        //            DatabaseExists = (bool)command.ExecuteScalar();
+        //        }
+
+        //        if (!DatabaseExists)
+        //        {
+        //            Console.WriteLine(" Database not found: {0}", targetDb);
+        //            var dbCreationScript = GetDatabaseCreationScript(folderPath,  targetDb);
+
+        //            foreach (var query in Queries(dbCreationScript))
+        //            {
+        //                using (var command = new SqlCommand(query, connection))
+        //                {
+        //                    try
+        //                    {
+        //                        command.ExecuteNonQuery();
+        //                    }
+        //                    catch (SqlException)
+        //                    {
+        //                        Console.WriteLine(query);
+        //                        throw;
+        //                    }
+        //                }
+        //            }
+        //        }
+        //    }
+        //}
+
+        private static string GetDatabaseCreationScript(string folderPath, string databaseCreationScriptFileName, string targetDbName)
+        {
+            var dbCreationScriptName = Path.Combine(folderPath, databaseCreationScriptFileName);
+
+            //if (File.Exists(dbCreationScriptName))
+            //{
+                Console.WriteLine(" Processing database creation script: {0}", databaseCreationScriptFileName);
+                var fileContent = File.ReadAllText(dbCreationScriptName);
+
+                return DoTokenReplacement(fileContent, targetDbName);
+            //}
+            //else
+            //    throw new Exception(string.Format("Database create script not found: {0}", databaseCreationScriptFileName));
+        }
+
+        void ExecuteSqlBatch(string sqlBatch)
+        {
+            using (var connection = new SqlConnection(connectionString))
+            {
+                connection.Open();
+
+                foreach (var query in Queries(sqlBatch))
+                {
+                    using (var command = new SqlCommand(query, connection))
+                    {
+                        try
+                        {
+                            command.ExecuteNonQuery();
+                        }
+                        catch (SqlException)
+                        {
+                            Console.WriteLine(query);
+                            throw;
+                        }
+                    }
+                }
+            }
+        }
+
+        void runSql(String fileName, String fileContent, String cksum)
+        {
+            if (isUnattendedModeEnabled || ConfirmToContinue(" Execute SQL"))
+            {
+                ExecuteSqlBatch(fileContent);
             }
 
             //  log the filename in table
@@ -202,6 +305,25 @@ namespace SqlBatchRunner
             }
 
             return queries;
+        }
+
+        static string DoTokenReplacement(string queryfile, string newValue)
+        {
+            var regexPattern = @"\${2}(?<database_name_token>\w+)\${2}";
+            var regex = new Regex(regexPattern);
+            var m = regex.Match(queryfile);
+
+            if (m.Success)
+            {
+                var oldValue = m.Groups["database_name_token"].Value;
+
+                if (!oldValue.Equals(newValue, StringComparison.Ordinal))
+                {
+                    Console.WriteLine("  Replacing token {0} with {1}", oldValue, newValue);
+                    queryfile = queryfile.Replace(oldValue, newValue);
+                }
+            }
+            return queryfile;
         }
     }
 }
