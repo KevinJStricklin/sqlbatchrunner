@@ -60,7 +60,7 @@ namespace SqlBatchRunner
 
         public void RunSingleFile(string fileName)
         {
-            Console.Write("{0} - Executing...", fileName);
+            Console.WriteLine("{0} - Executing...", fileName);
 
             var fileContent = File.ReadAllText(fileName);
 
@@ -181,6 +181,13 @@ namespace SqlBatchRunner
             using (var connection = new SqlConnection(connectionString))
             {
                 connection.Open();
+                connection.InfoMessage += (sender, args) =>
+                {
+                    ConsoleColor currentForeground = Console.ForegroundColor;
+                    Console.ForegroundColor = ConsoleColor.Green;
+                    Console.WriteLine(args.Message);
+                    Console.ForegroundColor = currentForeground;
+                };
 
                 foreach (var query in Queries(sqlBatch))
                 {
