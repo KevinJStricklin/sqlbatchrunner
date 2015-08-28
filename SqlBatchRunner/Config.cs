@@ -14,6 +14,9 @@ namespace SqlBatchRunner
 
         [DataMember]
         public DatabaseCreationScripts DatabaseCreationScripts { get; set; }
+
+        [DataMember]
+        public IEnumerable<SqlParameterPathAndAttribute> SqlParameterXmlSearch { get; set; }
     }
 
     [DataContract]
@@ -35,4 +38,18 @@ namespace SqlBatchRunner
         [DataMember]
         public IEnumerable<string> SchemaAndSeedScriptFileNames { get; set; }
     }
+
+    [DataContract]
+    public class SqlParameterPathAndAttribute
+    {
+        [DataMember]
+        public string NodePath { get; set; }
+
+        [DataMember]
+        public string Attribute { get; set; }
+
+        [DataMember]
+        public string Name { get; set; }
+    }
+
 }

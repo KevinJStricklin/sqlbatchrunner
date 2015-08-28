@@ -4,6 +4,7 @@ using System.Xml.Linq;
 using System.Xml.XPath;
 using System.Runtime.Serialization.Json;
 using System.Collections.Generic;
+using System.Data.SqlClient;
 
 namespace SqlBatchRunner
 {
@@ -48,7 +49,11 @@ namespace SqlBatchRunner
 
                 var connectionString = GetConnectionString(directoryName);
 
-                var runner = new SqlRunner(connectionString);
+                var config = GetConfig(directoryName);
+
+                var sqlParameters = GetSqlParameters(config);
+
+                var runner = new SqlRunner(connectionString, sqlParameters);
 
                 runner.RunSingleFile(fileName);
 
@@ -68,11 +73,13 @@ namespace SqlBatchRunner
 
                 var connectionString = GetConnectionString(directoryName);
 
-                var runner = new SqlRunner(connectionString);
+                var config = GetConfig(directoryName);
+
+                var sqlParameters = GetSqlParameters(config);
+
+                var runner = new SqlRunner(connectionString, sqlParameters);
                 if (!isUnattendedModeEnabled)
                     runner.EnableManualMode();
-
-                var config = GetConfig(directoryName);
 
                 if (config.DatabaseCreationScripts != null && !string.IsNullOrEmpty(config.DatabaseCreationScripts.CreateScriptFileName))
                     runner.CreateDatabase(directoryName, config.DatabaseCreationScripts.CreateScriptFileName, config.DatabaseCreationScripts.SchemaAndSeedScriptFileNames ?? new string[] { });
@@ -91,6 +98,26 @@ namespace SqlBatchRunner
             {
                 return (Config)serializer.ReadObject(stream);
             }
+        }
+
+        SqlParameter[] GetSqlParameters(Config config)
+        {
+            var sqlParameters = new List<SqlParameter>();
+
+            var xml = XDocument.Load(xmlFile);
+
+            foreach (var search in config.SqlParameterXmlSearch)
+            {
+                var node = xml.XPathSelectElement(search.NodePath);
+                if (node != null)
+                {
+                    var ParameterName = search.Name;
+                    var ParameterValue = node.Attribute(search.Attribute).Value;
+                    sqlParameters.Add(new SqlParameter(ParameterName, ParameterValue));
+                }
+            }
+
+            return sqlParameters.ToArray();
         }
 
         string GetConnectionString(string dirName)

@@ -16,10 +16,13 @@ namespace SqlBatchRunner
 
         private bool isUnattendedModeEnabled;
 
-        public SqlRunner(String connectionString)
+        private SqlParameter[] sqlParameters;
+
+        public SqlRunner(String connectionString, SqlParameter[] sqlParameters = null)
         {
             this.connectionString = connectionString;
             this.isUnattendedModeEnabled = true;
+            this.sqlParameters = sqlParameters ?? new SqlParameter[0];
         }
 
         public void EnableManualMode()
@@ -95,6 +98,8 @@ namespace SqlBatchRunner
                     {
                         using (var command = new SqlCommand(query, connection))
                         {
+                            command.Parameters.AddRange(sqlParameters);
+
                             try
                             {
                                 command.ExecuteNonQuery();
@@ -193,6 +198,7 @@ namespace SqlBatchRunner
                 {
                     using (var command = new SqlCommand(query, connection))
                     {
+                        command.Parameters.AddRange(sqlParameters);
                         try
                         {
                             command.ExecuteNonQuery();
